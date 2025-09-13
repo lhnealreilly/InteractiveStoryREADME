@@ -86,7 +86,8 @@ DYNAMODB_POLICY='{
       ],
       "Resource": [
         "arn:aws:dynamodb:'$REGION':*:table/adventure-game-state",
-        "arn:aws:dynamodb:'$REGION':*:table/adventure-stats"
+        "arn:aws:dynamodb:'$REGION':*:table/adventure-stats",
+        "arn:aws:dynamodb:'$REGION':*:table/adventure-story-scenes"
       ]
     }
   ]
@@ -146,6 +147,13 @@ aws dynamodb create-table \
   --key-schema AttributeName=stat_type,KeyType=HASH \
   --billing-mode PAY_PER_REQUEST \
   --region $REGION 2>/dev/null || echo "Table adventure-stats may already exist"
+
+aws dynamodb create-table \
+  --table-name adventure-story-scenes \
+  --attribute-definitions AttributeName=scene_id,AttributeType=S \
+  --key-schema AttributeName=scene_id,KeyType=HASH \
+  --billing-mode PAY_PER_REQUEST \
+  --region $REGION 2>/dev/null || echo "Table adventure-story-scenes may already exist"
 
 # Create API Gateway
 echo "🌐 Setting up API Gateway..."
