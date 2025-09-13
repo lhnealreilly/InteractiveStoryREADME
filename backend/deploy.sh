@@ -226,7 +226,7 @@ aws lambda add-permission \
 echo "🖼️  Configuring binary media types..."
 aws apigateway update-rest-api \
   --rest-api-id $API_ID \
-  --patch-ops op=replace,path=/binaryMediaTypes,value=image/png \
+  --patch-operations "op=add,path=/binaryMediaTypes/*~1*" \
   --region $REGION 2>/dev/null || echo "Binary media type may already be set"
 
 # Deploy the API
