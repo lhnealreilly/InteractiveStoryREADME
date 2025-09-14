@@ -19,17 +19,27 @@
 
 ## 🌟 What Makes This Special?
 
-This isn't just a README - it's a **fully interactive adventure game** that has a frontend entirely within GitHub's markdown system. No external websites, no JavaScript, no installations required. Just pure markdown magic powered by creative use of GitHub's image proxy system.
+This isn't just a README - it's a **fully interactive RPG adventure game** that lives entirely within GitHub's markdown system. No external websites, no JavaScript, no installations required. Just pure markdown magic powered by AI-driven storytelling and creative use of GitHub's image proxy system.
 
 ### 🎯 The Innovation
+By leveraging GitHub's image serving mechanism, **Google Gemini AI**, and dynamic PNG generation, we've created something quite interesting: A fully functional choose your own adventure that lives entierely withing a README.md file.
 
-By leveraging GitHub's image serving mechanism and dynamic PNG generation, we've created something that shouldn't be possible: **a stateful, interactive game that lives in documentation**.
+### ⭐ Revolutionary Features
+
+- **🤖 AI-Powered Storytelling**: Google Gemini Flash generates unique, contextual story scenes in real-time
+- **🎮 Full RPG System**: Health, gold, items, leveling, and permanent character progression
+- **📖 Story Continuity**: Each scene includes a summary of what happened, creating seamless narrative flow
+- **🎲 Infinite Adventures**: Every choice could create new, never-before-seen story paths
+- **💀 Death Mechanics**: Real stakes - lose all progress if your health reaches zero
 
 ---
 
 ## 🎮 The Adventure Begins
 
-*You find yourself standing at the edge of a mysterious forest. The ancient trees whisper secrets, and two paths diverge before you. Your choices will shape your destiny...*
+*Welcome to an AI-powered adventure where every choice matters. Your character has health, gold, and items that persist throughout your journey. Choose wisely - death resets everything, but victory brings rewards and progression through an infinite, procedurally generated world...*
+
+### 🎭 Your Character Stats
+*Displayed live on every scene - watch your health, gold, and items change based on your choices!*
 
 ### Current Scene
 ![Current Adventure Scene](https://13sx4b67dg.execute-api.us-east-1.amazonaws.com/prod/scene.png?v=1)
@@ -67,64 +77,93 @@ GitHub README → Image Links → HTTP Requests → Dynamic PNGs → Updated Sto
 ```mermaid
 graph TB
     A[User Clicks Choice] --> B[HTTP Request to Backend]
-    B --> C{Parse Choice & Update State}
-    C --> D[Generate Story Content with AI]
-    D --> E[Render Scene as PNG]
-    E --> F[Return New Game State]
-    F --> G[GitHub Proxy Serves Image]
-    G --> H[README Updates with New Scene]
-    
-    I[Global Game State] --> C
-    C --> I
-    
-    style A fill:#e1f5fe
-    style E fill:#f3e5f5
-    style I fill:#fff3e0
+    B --> C{Parse Choice & Update Player State}
+    C --> D[Query DynamoDB for Scene]
+    D --> E{Scene Exists?}
+    E -->|No| F[Generate with Gemini AI]
+    E -->|Yes| G[Load Existing Scene]
+    F --> H[Create Contextual Story]
+    H --> I[Calculate Player Stats]
+    I --> G
+    G --> J{Player Health > 0?}
+    J -->|No| K[Reset to Start]
+    J -->|Yes| L[Render Scene as PNG]
+    K --> L
+    L --> M[Return Dynamic Image]
+    M --> N[GitHub Proxy Serves Image]
+    N --> O[README Updates Instantly]
+
+    P[Player State] --> C
+    C --> P
+    Q[Story Database] --> D
+    F --> Q
+
+    style F fill:#ff9800
+    style H fill:#4caf50
+    style I fill:#2196f3
+    style P fill:#9c27b0
 ```
 
 ### The Stack
 
-**Backend Magic**
-- **AWS Lambda** - Serverless Python function for dynamic responses
-- **Python + Pillow** - Dynamic PNG image generation
-- **DynamoDB** - Global state management and statistics tracking
+**🧠 AI-Powered Backend**
+- **Google Gemini 2.5 Flash** - Real-time story generation with structured output
+- **AWS Lambda** - Serverless Python function for lightning-fast responses
+- **Python + Pillow** - Dynamic PNG image generation with live stats overlay
+- **DynamoDB** - Multi-table architecture: game state, story scenes, and statistics
+- **Pydantic** - Type-safe structured data validation for AI responses
 - **API Gateway** - REST API with binary media type support
 
-**Frontend Illusion**
-- **Pure Markdown** - No JavaScript required
-- **Dynamic Images** - PNG-based UI updates
-- **GitHub Proxy** - Handles all requests seamlessly
+**✨ Frontend Magic**
+- **Pure Markdown** - No JavaScript, CSS, or external dependencies
+- **Dynamic Images** - PNG-based UI with real-time player stats
+- **GitHub Proxy** - Seamless image serving and caching
+- **Contextual Storytelling** - AI maintains narrative consistency across infinite paths
 
 ---
 
-## 🎨 Dynamic PNG Generation
+## 🎮 RPG Character System
 
-Each scene is rendered in real-time as a beautiful PNG image:
+### 📊 Player Statistics
 
-### Scene Components
+Your character progression is automatically saved and displayed on every scene:
+
+- **❤️ Health System**: Start with 100 HP, lose health in combat, gain from healing
+- **💰 Gold Economy**: Earn gold from victories, spend on items, lose from failures
+- **⭐ Experience & Leveling**: Gain XP from all actions, level up every 100 XP
+- **🎒 Dynamic Inventory**: Collect theme-specific items that enhance your abilities
+- **🏆 Permanent Progression**: All stats persist until death resets everything
+
+---
+
+## 🤖 AI-Powered Story Generation
+
+### 🧠 Google Gemini Integration
+
+Every new scene is generated using **Google Gemini 2.5 Flash** with structured output:
+
 ```python
-STORY_CONFIG = {
-    "scenes": {
-        "start": {
-            "title": "The Mysterious Forest",
-            "description": "You find yourself at the edge of an ancient forest...",
-            "background_color": "#2d5016",
-            "choices": {
-                "a": {"text": "Take the shadowy left path", "leads_to": "dark_path"},
-                "b": {"text": "Follow the sunlit right path", "leads_to": "light_path"}
-            }
-        }
-    }
-}
+class GeneratedScene(BaseModel):
+    title: str
+    description: str
+    summary: str  # What happened between scenes
+    background_color: str
+    choice_a: SceneChoice
+    choice_b: SceneChoice
 ```
 
-### Real-time Rendering
-- **Background Colors**: Scene-specific color palettes for atmosphere
-- **Text Rendering**: Dynamic typography using Pillow's ImageDraw
-- **Game Statistics**: Live choice counts and progress tracking
-- **Choice Buttons**: Color-coded interactive elements (green/blue)
+### 📖 Contextual Story Creation
 
----
+The AI receives rich context for every scene generation:
+
+```python
+context = f"""
+Previous scene: "{prev_title}"
+Player chose: "{choice_text}"
+Current stats: Health {health}/{max_health}, Gold {gold}, Level {level}
+Items: {', '.join(items)}
+"""
+```
 
 ## 📊 Global Adventure Metrics
 
@@ -139,15 +178,19 @@ The adventure tracks collective player data:
 Want to build your own interactive README? Here's how:
 
 ### Prerequisites
-- AWS CLI configured with appropriate permissions
-- Python 3.9+ installed locally
-- AWS account with Lambda, API Gateway, and DynamoDB access
+- **AWS CLI** configured with appropriate permissions
+- **Python 3.10+** installed locally
+- **Google AI API Key** - Get yours at [https://aistudio.google.com/app/apikey](https://aistudio.google.com/app/apikey)
+- **AWS Account** with Lambda, API Gateway, and DynamoDB access
 
 ### 1. Set Up the Backend
 ```bash
 # Clone this repository
 git clone https://github.com/your-username/interactive-story-readme.git
 cd interactive-story-readme/backend
+
+# Add your Google AI API key to .env file
+echo "GOOGLE_API_KEY=your_api_key_here" > .env
 
 # Make the deployment script executable
 chmod +x deploy.sh
@@ -157,11 +200,12 @@ chmod +x deploy.sh
 ```
 
 The deployment script will:
-- Create AWS Lambda function with Pillow layer support
-- Set up API Gateway with binary media type configuration
-- Create DynamoDB tables for game state and statistics
-- Configure IAM roles and permissions
-- Output your API endpoints
+- **Install AI Dependencies**: Google Gemini AI, Pydantic for structured output
+- **Create Lambda Function**: With Pillow and Pydantic layers for image generation and AI integration
+- **Set up API Gateway**: Binary media type configuration for PNG responses
+- **Create DynamoDB Tables**: Game state, statistics, and AI-generated story scenes
+- **Configure IAM Roles**: Full permissions for DynamoDB and external API access
+- **Output API Endpoints**: Ready-to-use URLs for your README integration
 
 ### 2. Design Your README
 ```markdown
@@ -176,23 +220,26 @@ The deployment script will:
 ![Stats](https://YOUR-API-ID.execute-api.us-east-1.amazonaws.com/prod/stats.png)
 ```
 
-### 3. Customize Your Story
-Edit `lambda_function.py` and modify the `STORY_CONFIG` dictionary:
+### 3. Customize Your Adventure
+
+**🤖 AI-Powered Generation (Recommended)**
+The system automatically generates infinite unique stories using Google Gemini AI. No manual story writing required! Just configure themes and let AI create contextual, engaging scenes.
+
+**🎨 Theme Configuration**
+Edit `lambda_function.py` to customize story themes:
 ```python
-STORY_CONFIG = {
-    "scenes": {
-        "your_scene": {
-            "title": "Your Scene Title",
-            "description": "Your scene description...",
-            "background_color": "#your-color",
-            "choices": {
-                "a": {"text": "Choice A text", "leads_to": "next_scene"},
-                "b": {"text": "Choice B text", "leads_to": "other_scene"}
-            }
-        }
+STORY_THEMES = {
+    'your_theme': {
+        'locations': ['space station', 'alien world', 'cybercity'],
+        'creatures': ['robot', 'alien', 'cyborg'],
+        'objects': ['laser gun', 'computer', 'spaceship'],
+        'colors': ['#0d47a1', '#1a237e', '#4a148c']
     }
 }
 ```
+
+**⚙️ Player Progression Settings**
+Adjust RPG mechanics in the `INITIAL_PLAYER_STATE` and `STATE_DELTAS` configurations to balance difficulty, rewards, and progression speed.
 
 ### 4. Redeploy Changes
 ```bash
@@ -204,17 +251,25 @@ STORY_CONFIG = {
 
 ### 5. Troubleshooting
 
-**Images showing as base64 text instead of pictures?**
-- The deployment script configures binary media types automatically
-- Try refreshing the page after a few minutes for cache to clear
+**🤖 AI Generation Issues**
+- **Google AI API Errors**: Verify your API key in `.env` and check quotas at [Google AI Studio](https://aistudio.google.com)
+- **Fallback System**: If Gemini fails, the system automatically uses procedural generation
+- **Rate Limiting**: Gemini Flash has generous limits, but consider caching for high-traffic adventures
 
-**Lambda function timeout errors?**
-- Default timeout is 30 seconds, which should be sufficient
-- Check CloudWatch logs: `aws logs tail /aws/lambda/interactive-adventure --follow`
+**🖼️ Image Display Problems**
+- **Base64 Text**: Deployment script configures binary media types automatically
+- **Cache Issues**: GitHub proxy caches aggressively - add `?v=timestamp` parameters
+- **Large Images**: Optimize image size in Pillow settings if Lambda timeouts occur
 
-**DynamoDB permission errors?**
-- Ensure your AWS CLI user has DynamoDB permissions
-- The deployment script creates necessary IAM roles automatically
+**⚡ Performance Optimization**
+- **Lambda Cold Starts**: Consider provisioned concurrency for instant response
+- **DynamoDB Throttling**: Upgrade from on-demand to provisioned throughput if needed
+- **CloudWatch Monitoring**: `aws logs tail /aws/lambda/interactive-adventure --follow`
+
+**🔧 Development & Testing**
+- **Local Testing**: Use `python3 test_player_state.py` to verify RPG mechanics
+- **AI Testing**: Run Gemini integration tests with your API key
+- **Database Inspection**: Check DynamoDB console for scene generation and player state
 
 **Testing locally:**
 ```bash
@@ -263,26 +318,11 @@ This proves that **documentation doesn't have to be boring**. Imagine:
 
 ## 🤝 Community & Development
 
-### Current Story Branches
-
-The adventure currently features:
-
-- **🏰 The Ancient Kingdom Path** - Political intrigue and royal mysteries
-- **🐉 The Dragon Valley Route** - Epic battles and magical encounters  
-- **🌊 The Mystic Seas Journey** - Naval adventures and underwater secrets
-- **🔮 The Wizard's Academy** - Magical learning and spell mastery
-- **🏴‍☠️ The Pirate's Life** - High seas adventure and treasure hunting
-
 ### Contributing New Story Content
 ```bash
 # Add new story branches
 git checkout -b feature/new-adventure-branch
 
-# Edit the story configuration in lambda_function.py
-# Add new scenes to STORY_CONFIG dictionary
-
-# Test locally (optional)
-python3 backend/test_images.py
 
 # Deploy changes
 cd backend && ./deploy.sh
@@ -329,7 +369,7 @@ headers = {
 - [x] Basic choice system
 - [x] Dynamic scene generation  
 - [x] Global statistics tracking
-- [ ] Player achievement system
+
 
 ### Phase 2: Advanced Features *(Next Month)*
 - [ ] Inventory management system
@@ -338,9 +378,7 @@ headers = {
 - [ ] Multiplayer voting on group decisions
 
 ### Phase 3: AI Evolution *(Future)*
-- [ ] Integration with AI services for dynamic story generation
 - [ ] AI-generated scene artwork
-- [ ] Personalized story branching based on player history
 - [ ] Advanced interaction methods
 
 ---

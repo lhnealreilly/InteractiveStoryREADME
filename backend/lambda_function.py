@@ -7,12 +7,39 @@ import uuid
 import time
 from datetime import datetime
 import random
+import os
+import subprocess
+import tempfile
+from google import genai
+from pydantic import BaseModel
+from typing import List, Optional
+from dotenv import load_dotenv
+from jinja2 import Template
+
+load_dotenv()
 
 # DynamoDB setup
 dynamodb = boto3.resource('dynamodb')
 game_state_table = dynamodb.Table('adventure-game-state')
 stats_table = dynamodb.Table('adventure-stats')
 story_scenes_table = dynamodb.Table('adventure-story-scenes')
+
+# Google Gemini setup
+GOOGLE_API_KEY = os.getenv('GOOGLE_API_KEY')
+genai_client = genai.Client(api_key=GOOGLE_API_KEY)
+
+# Pydantic models for structured scene generation
+class SceneChoice(BaseModel):
+    text: str
+    leads_to: str
+
+class GeneratedScene(BaseModel):
+    title: str
+    description: str
+    summary: str  # What happened in the transition to this scene
+    background_color: str
+    choice_a: SceneChoice
+    choice_b: SceneChoice
 
 # Story generation templates and themes
 STORY_THEMES = {
@@ -73,8 +100,363 @@ INITIAL_SCENE = {
     },
     'theme': 'fantasy',
     'created_at': datetime.now().isoformat(),
-    'player_state': INITIAL_PLAYER_STATE.copy()
+    'player_state': INITIAL_PLAYER_STATE.copy(),
+    'summary': 'Your adventure begins in this mysterious realm.'
 }
+
+# HTML Template for scene rendering
+SCENE_TEMPLATE = """
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Adventure Scene</title>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Cinzel:wght@400;600;700&family=Cormorant+Garamond:ital,wght@0,400;0,600;1,400&display=swap');
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            background: #0d1117;
+        }
+
+        body {
+            width: 800px;
+            height: 600px;
+            background: linear-gradient(135deg, #0d1117, {{ background_color }}99);
+            font-family: 'Cormorant Garamond', serif;
+            color: #ffffff;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .scene-container {
+            padding: 40px;
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            position: relative;
+        }
+
+        .decorative-border {
+            position: absolute;
+            top: 15px;
+            left: 15px;
+            right: 15px;
+            bottom: 15px;
+            border: 3px solid rgba(255, 255, 255, 0.5);
+            border-radius: 15px;
+            pointer-events: none;
+        }
+
+        .title {
+            font-family: 'Cinzel', serif;
+            font-size: 36px;
+            font-weight: 700;
+            text-align: center;
+            margin-bottom: 25px;
+            text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.7);
+            color: #fff;
+            letter-spacing: 2px;
+        }
+
+        .content-area {
+            flex-grow: 1;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            max-width: 720px;
+            margin: 0 auto;
+        }
+
+        .summary {
+            background: rgba(255, 255, 136, 0.25);
+            border-left: 4px solid #ffeb3b;
+            padding: 15px 20px;
+            margin-bottom: 20px;
+            border-radius: 0 8px 8px 0;
+            font-style: italic;
+            font-size: 18px;
+            line-height: 1.4;
+        }
+
+        .summary::before {
+            content: "▶ ";
+            color: #ffff88;
+            font-weight: bold;
+        }
+
+        .description {
+            font-size: 24px;
+            line-height: 1.6;
+            text-align: center;
+            margin-bottom: 30px;
+            text-shadow: 1px 1px 2px rgba(0, 0, 0, 0.5);
+            font-weight: 400;
+        }
+
+        .stats-overlay {
+            position: absolute;
+            bottom: 20px;
+            left: 20px;
+            background: rgba(13, 17, 23, 0.9);
+            padding: 15px;
+            border-radius: 10px;
+            font-size: 16px;
+            line-height: 1.4;
+            backdrop-filter: blur(5px);
+            border: 1px solid rgba(255, 255, 255, 0.4);
+        }
+
+        .stat-line {
+            margin: 3px 0;
+            display: flex;
+            align-items: center;
+        }
+
+        .stat-icon {
+            margin-right: 8px;
+            font-size: 18px;
+        }
+
+        .health-bar {
+            width: 120px;
+            height: 8px;
+            background: rgba(255, 255, 255, 0.3);
+            border-radius: 4px;
+            overflow: hidden;
+            margin-left: 10px;
+        }
+
+        .health-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #ff4444, #ff8888);
+            transition: width 0.3s ease;
+            width: {{ health_percentage }}%;
+        }
+
+        .decorative-elements {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+        }
+
+        .corner-ornament {
+            position: absolute;
+            width: 60px;
+            height: 60px;
+            opacity: 0.3;
+        }
+
+        .corner-ornament.top-left {
+            top: 25px;
+            left: 25px;
+            background: radial-gradient(circle, rgba(255,255,255,0.4) 0%, transparent 70%);
+            border-radius: 50%;
+        }
+
+        .corner-ornament.bottom-right {
+            bottom: 25px;
+            right: 25px;
+            background: radial-gradient(circle, rgba(255,255,255,0.4) 0%, transparent 70%);
+            border-radius: 50%;
+        }
+
+        .theme-fantasy {
+            background: linear-gradient(135deg, #2d5016, #4a7c59);
+        }
+
+        .theme-sci_fi {
+            background: linear-gradient(135deg, #0d47a1, #1976d2);
+        }
+
+        .theme-mystery {
+            background: linear-gradient(135deg, #212121, #424242);
+        }
+    </style>
+</head>
+<body class="theme-{{ theme }}">
+    <div class="decorative-border"></div>
+    <div class="scene-container">
+        <div class="title">{{ title }}</div>
+
+        <div class="content-area">
+            {% if summary and scene_id != 'start' %}
+            <div class="summary">{{ summary }}</div>
+            {% endif %}
+
+            <div class="description">{{ description | replace('\n', '<br>') }}</div>
+        </div>
+
+        <div class="stats-overlay">
+            <div class="stat-line">
+                <span class="stat-icon">❤️</span>
+                Health: {{ health }}/{{ max_health }}
+                <div class="health-bar">
+                    <div class="health-fill"></div>
+                </div>
+            </div>
+            <div class="stat-line">
+                <span class="stat-icon">💰</span>
+                Gold: {{ gold }}
+            </div>
+            <div class="stat-line">
+                <span class="stat-icon">⭐</span>
+                Level: {{ level }} (XP: {{ experience }})
+            </div>
+            {% if items %}
+            <div class="stat-line">
+                <span class="stat-icon">🎒</span>
+                Items: {{ items_display }}
+            </div>
+            {% endif %}
+        </div>
+    </div>
+
+    <div class="decorative-elements">
+        <div class="corner-ornament top-left"></div>
+        <div class="corner-ornament bottom-right"></div>
+    </div>
+</body>
+</html>
+"""
+
+CHOICE_TEMPLATE = """
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Choice Button</title>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Cinzel:wght@600&display=swap');
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            background: #0d1117;
+        }
+
+        body {
+            width: 400px;
+            height: 80px;
+            font-family: 'Cinzel', serif;
+            color: #ffffff;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            position: relative;
+            border-radius: 12px;
+            box-shadow: 0 6px 20px rgba(0, 0, 0, 0.5);
+            border: 2px solid rgba(255, 255, 255, 0.6);
+        }
+
+        .button-content {
+            text-align: center;
+            padding: 0 15px;
+            width: 100%;
+            max-width: 370px;
+        }
+
+        .choice-label {
+            font-size: 14px;
+            opacity: 0.8;
+            margin-bottom: 2px;
+            letter-spacing: 1px;
+        }
+
+        .choice-text {
+            font-size: 16px;
+            font-weight: 600;
+            text-shadow: 1px 1px 2px rgba(0, 0, 0, 0.7);
+            letter-spacing: 0.5px;
+            line-height: 1.2;
+            word-wrap: break-word;
+            hyphens: auto;
+        }
+
+        /* Scale text down for longer choices */
+        @media (max-width: 400px) {
+            .choice-text {
+                font-size: 14px;
+            }
+        }
+
+        /* Further scaling for very long text */
+        .choice-text.long-text {
+            font-size: 14px;
+            line-height: 1.1;
+        }
+
+        .choice-text.very-long-text {
+            font-size: 12px;
+            line-height: 1.0;
+        }
+
+        .shine {
+            position: absolute;
+            top: 0;
+            left: -100%;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(90deg, transparent, rgba(255,255,255,0.3), transparent);
+            animation: shine 3s infinite;
+        }
+
+        @keyframes shine {
+            0% { left: -100%; }
+            100% { left: 100%; }
+        }
+    </style>
+</head>
+<body>
+    <div class="button-content">
+        <div class="choice-label">Choice {{ choice_type.upper() }}</div>
+        <div class="choice-text" id="choiceText">{{ text }}</div>
+    </div>
+    <div class="shine"></div>
+
+    <script>
+        // Auto-scale text to fit within button
+        function scaleTextToFit() {
+            const textElement = document.getElementById('choiceText');
+            const text = textElement.textContent;
+
+            // Add classes based on text length
+            if (text.length > 40) {
+                textElement.classList.add('very-long-text');
+            } else if (text.length > 25) {
+                textElement.classList.add('long-text');
+            }
+
+            // Additional dynamic scaling if needed
+            const container = textElement.parentElement;
+            const containerWidth = container.offsetWidth - 30; // Account for padding
+
+            let fontSize = window.getComputedStyle(textElement).fontSize;
+            fontSize = parseInt(fontSize);
+
+            // Reduce font size until text fits
+            while (textElement.scrollWidth > containerWidth && fontSize > 10) {
+                fontSize -= 1;
+                textElement.style.fontSize = fontSize + 'px';
+            }
+        }
+
+        // Run after fonts load
+        window.addEventListener('load', scaleTextToFit);
+        document.fonts.ready.then(scaleTextToFit);
+    </script>
+</body>
+</html>
+"""
 
 def lambda_handler(event, context):
     """Main Lambda handler for adventure game endpoints"""
@@ -220,7 +602,27 @@ def get_or_generate_scene(scene_id, theme='fantasy', previous_scene=None, choice
     return generate_new_scene(scene_id, theme, previous_scene, choice_made)
 
 def generate_new_scene(scene_id, theme='fantasy', previous_scene=None, choice_made=None):
-    """Generate a new story scene using procedural generation"""
+    """Generate a new story scene using Gemini AI with fallback to procedural generation"""
+
+    # Try Gemini generation first
+    gemini_scene = generate_scene_with_gemini(scene_id, theme, previous_scene, choice_made)
+
+    if gemini_scene:
+        # Add player state to Gemini-generated scene
+        player_state = generate_player_state_for_scene(scene_id, theme, previous_scene, choice_made)
+        gemini_scene['player_state'] = player_state
+
+        # Save to DynamoDB
+        try:
+            story_scenes_table.put_item(Item=gemini_scene)
+            print(f"Saved Gemini-generated scene: {scene_id}")
+        except Exception as e:
+            print(f"Error saving Gemini scene {scene_id}: {e}")
+
+        return gemini_scene
+
+    # Fallback to original procedural generation
+    print(f"Falling back to procedural generation for scene: {scene_id}")
 
     # Get theme data
     theme_data = STORY_THEMES.get(theme, STORY_THEMES['fantasy'])
@@ -236,14 +638,17 @@ def generate_new_scene(scene_id, theme='fantasy', previous_scene=None, choice_ma
         {
             'title': f'The {location.title()}',
             'description': f'You arrive at {location}. A {creature} watches\\nyou from the shadows. What do you do?',
+            'summary': f'You venture deeper into the adventure and encounter {location}.'
         },
         {
             'title': f'Encounter at {location.title()}',
             'description': f'Before you lies {location}. You notice\\n{object_item} glinting in the distance.',
+            'summary': f'Your journey leads you to {location} where you spot something interesting.'
         },
         {
             'title': f'The {creature.title()} Challenge',
             'description': f'A {creature} emerges from {location}.\\nIt seems to be guarding {object_item}.',
+            'summary': f'A {creature} appears before you, presenting a new challenge.'
         }
     ]
 
@@ -292,6 +697,7 @@ def generate_new_scene(scene_id, theme='fantasy', previous_scene=None, choice_ma
         'scene_id': scene_id,
         'title': pattern['title'],
         'description': pattern['description'],
+        'summary': pattern['summary'],
         'background_color': background_color,
         'choices': {
             'a': {'text': selected_choices[0][0], 'leads_to': next_scene_a},
@@ -422,6 +828,134 @@ def get_level_items(level, theme):
 
     return theme_items.get(theme, {}).get(level, [])
 
+def render_html_to_png(html_content, width=800, height=600):
+    """Convert HTML to PNG using wkhtmltoimage"""
+    try:
+        # Create temporary files
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.html', delete=False) as html_file:
+            html_file.write(html_content)
+            html_file.flush()
+
+            with tempfile.NamedTemporaryFile(suffix='.png', delete=False) as png_file:
+                png_path = png_file.name
+
+            # Use wkhtmltoimage to convert HTML to PNG
+            cmd = [
+                '/opt/bin/wkhtmltoimage',  # Lambda layer path
+                '--width', str(width),
+                '--height', str(height),
+                '--quality', '95',
+                '--format', 'png',
+                '--disable-smart-width',
+                '--no-stop-slow-scripts',
+                '--javascript-delay', '1000',  # Allow time for fonts to load
+                html_file.name,
+                png_path
+            ]
+
+            # Run the conversion
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+
+            if result.returncode != 0:
+                print(f"wkhtmltoimage error: {result.stderr}")
+                return None
+
+            # Read the generated PNG
+            with open(png_path, 'rb') as f:
+                png_data = f.read()
+
+            # Cleanup
+            os.unlink(html_file.name)
+            os.unlink(png_path)
+
+            return png_data
+
+    except Exception as e:
+        print(f"HTML to PNG conversion failed: {e}")
+        return None
+
+def generate_scene_with_gemini(scene_id, theme, previous_scene=None, choice_made=None):
+    """Use Google Gemini to generate a new scene with structured output"""
+
+    try:
+        # Build context from previous scene
+        if previous_scene and choice_made:
+            prev_title = previous_scene.get('title', 'Unknown Scene')
+            prev_description = previous_scene.get('description', '')
+            choice_text = previous_scene.get('choices', {}).get(choice_made, {}).get('text', 'made a choice')
+            player_state = previous_scene.get('player_state', INITIAL_PLAYER_STATE)
+
+            context = f"""
+Previous scene: "{prev_title}"
+Previous description: {prev_description}
+Player chose: "{choice_text}"
+Current player state: Health {player_state.get('health', 100)}/{player_state.get('max_health', 100)},
+Gold {player_state.get('gold', 50)}, Level {player_state.get('level', 1)},
+Items: {', '.join(player_state.get('items', []))}
+"""
+        else:
+            context = "This is the beginning of a new adventure."
+
+        # Get theme information
+        theme_data = STORY_THEMES.get(theme, STORY_THEMES['fantasy'])
+        locations = ', '.join(theme_data['locations'])
+        creatures = ', '.join(theme_data['creatures'])
+        objects = ', '.join(theme_data['objects'])
+
+        prompt = f"""
+You are creating an interactive adventure scene for a {theme} themed story.
+
+{context}
+
+Create a new scene that continues the story logically. The scene should:
+1. Have an engaging title
+2. Provide a vivid description (2-3 sentences, use \\n for line breaks)
+3. Include a summary of what happened between the previous scene and this one (e.g., "You swing your sword at the phoenix, it shoots flames at you")
+4. Choose an appropriate background color from the theme palette: {', '.join(theme_data['colors'])}
+5. Offer two meaningful choices that fit the {theme} theme
+6. Use these theme elements when appropriate:
+   - Locations: {locations}
+   - Creatures: {creatures}
+   - Objects: {objects}
+
+Make the story engaging and maintain narrative consistency with the previous events.
+"""
+
+        # Generate scene using Gemini
+        response = genai_client.models.generate_content(
+            model="gemini-2.5-flash",
+            contents=prompt,
+            config={
+                "response_mime_type": "application/json",
+                "response_schema": GeneratedScene,
+            },
+        )
+
+        # Parse the generated scene
+        generated_scene: GeneratedScene = response.parsed
+
+        # Convert to our scene format
+        new_scene = {
+            'scene_id': scene_id,
+            'title': generated_scene.title,
+            'description': generated_scene.description,
+            'summary': generated_scene.summary,
+            'background_color': generated_scene.background_color,
+            'choices': {
+                'a': {'text': generated_scene.choice_a.text, 'leads_to': f'{theme}_{len(scene_id)}a_{random.randint(1000, 9999)}'},
+                'b': {'text': generated_scene.choice_b.text, 'leads_to': f'{theme}_{len(scene_id)}a_{random.randint(1000, 9999)}'}
+            },
+            'theme': theme,
+            'created_at': datetime.now().isoformat()
+        }
+
+        return new_scene
+
+    except Exception as e:
+        print(f"Error generating scene with Gemini: {e}")
+        # Fallback to original generation method
+        return None
+
 def process_choice(choice):
     """Process a player's choice and update game state"""
     current_state = get_current_game_state()
@@ -443,115 +977,173 @@ def process_choice(choice):
             update_game_state(next_scene_id)
 
 def generate_scene_image():
-    """Generate the main scene image showing current story state"""
+    """Generate the main scene image using HTML template rendering"""
     current_state = get_current_game_state()
     scene_id = current_state.get('current_scene', 'start')
     scene = get_or_generate_scene(scene_id)
-    
-    # Create image canvas
-    width, height = 800, 600
-    img = Image.new('RGB', (width, height), scene['background_color'])
-    draw = ImageDraw.Draw(img)
-    
-    try:
-        # Try to load a nice font, fall back to default if not available
-        title_font = ImageFont.truetype("/opt/fonts/Arial-Bold.ttf", 48)
-        text_font = ImageFont.truetype("/opt/fonts/Arial.ttf", 24)
-        small_font = ImageFont.truetype("/opt/fonts/Arial.ttf", 18)
-    except:
-        title_font = ImageFont.load_default()
-        text_font = ImageFont.load_default()
-        small_font = ImageFont.load_default()
-    
-    # Draw title
-    title_bbox = draw.textbbox((0, 0), scene['title'], font=title_font)
-    title_width = title_bbox[2] - title_bbox[0]
-    draw.text(((width - title_width) // 2, 50), scene['title'], 
-              fill='white', font=title_font)
-    
-    # Draw description
-    description_lines = scene['description'].split('\n')
-    y_pos = 150
-    for line in description_lines:
-        line_bbox = draw.textbbox((0, 0), line, font=text_font)
-        line_width = line_bbox[2] - line_bbox[0]
-        draw.text(((width - line_width) // 2, y_pos), line, 
-                  fill='white', font=text_font)
-        y_pos += 35
-    
-    # Draw decorative elements
-    draw.ellipse([50, 50, 100, 100], fill='#ffffff20')
-    draw.ellipse([700, 500, 750, 550], fill='#ffffff20')
-    
-    # Draw player stats
+
+    # Get player state
     player_state = scene.get('player_state', INITIAL_PLAYER_STATE)
     health = player_state.get('health', 100)
     max_health = player_state.get('max_health', 100)
     gold = player_state.get('gold', 50)
     level = player_state.get('level', 1)
     experience = player_state.get('experience', 0)
-
-    # Player stats overlay
-    stats_y = height - 120
-    draw.text((50, stats_y), f"Health: {health}/{max_health}", fill='white', font=small_font)
-    draw.text((50, stats_y + 20), f"Gold: {gold}", fill='white', font=small_font)
-    draw.text((50, stats_y + 40), f"Level: {level} (XP: {experience})", fill='white', font=small_font)
-
-    # Items display
     items = player_state.get('items', [])
+
+    # Prepare items display
+    items_display = ""
     if items:
-        items_text = "Items: " + ", ".join([ITEMS.get(item, {}).get('name', item) for item in items[:3]])
+        item_names = [ITEMS.get(item, {}).get('name', item) for item in items[:3]]
+        items_display = ", ".join(item_names)
         if len(items) > 3:
-            items_text += f" (+{len(items)-3} more)"
-        draw.text((50, stats_y + 60), items_text, fill='white', font=small_font)
-    
-    # Convert to bytes
+            items_display += f" (+{len(items)-3} more)"
+
+    # Calculate health percentage for progress bar
+    health_percentage = (health / max_health * 100) if max_health > 0 else 0
+
+    # Render HTML template
+    template = Template(SCENE_TEMPLATE)
+    html_content = template.render(
+        title=scene.get('title', 'Adventure Scene'),
+        description=scene.get('description', 'Your adventure continues...'),
+        summary=scene.get('summary', ''),
+        scene_id=scene_id,
+        background_color=scene.get('background_color', '#2d5016'),
+        theme=scene.get('theme', 'fantasy'),
+        health=health,
+        max_health=max_health,
+        health_percentage=health_percentage,
+        gold=gold,
+        level=level,
+        experience=experience,
+        items=items,
+        items_display=items_display
+    )
+
+    # Convert HTML to PNG
+    png_data = render_html_to_png(html_content, 800, 600)
+
+    # Fallback to PIL if HTML conversion fails
+    if png_data is None:
+        return generate_scene_image_fallback(scene, current_state)
+
+    return png_data
+
+def generate_choice_image(choice_type):
+    """Generate choice button images using HTML template rendering"""
+    current_state = get_current_game_state()
+    scene_id = current_state.get('current_scene', 'start')
+    scene = get_or_generate_scene(scene_id)
+
+    choice_data = scene.get('choices', {}).get(choice_type, {
+        'text': 'Continue Adventure',
+        'leads_to': 'start'
+    })
+
+    # Color schemes for choices
+    color = '#4CAF50' if choice_type == 'a' else '#2196F3'
+    hover_color = '#45a049' if choice_type == 'a' else '#1976D2'
+
+    # Render HTML template
+    template = Template(CHOICE_TEMPLATE)
+    html_content = template.render(
+        choice_type=choice_type,
+        text=choice_data['text'],
+        color=color,
+        hover_color=hover_color
+    )
+
+    # Convert HTML to PNG
+    png_data = render_html_to_png(html_content, 400, 80)
+
+    # Fallback to PIL if HTML conversion fails
+    if png_data is None:
+        return generate_choice_image_fallback(choice_type, choice_data, color)
+
+    return png_data
+
+def generate_scene_image_fallback(scene, current_state):
+    """Fallback scene image generation using PIL"""
+    width, height = 800, 600
+    img = Image.new('RGB', (width, height), scene.get('background_color', '#2d5016'))
+    draw = ImageDraw.Draw(img)
+
+    try:
+        title_font = ImageFont.truetype("/opt/fonts/Arial-Bold.ttf", 36)
+        text_font = ImageFont.truetype("/opt/fonts/Arial.ttf", 20)
+        small_font = ImageFont.truetype("/opt/fonts/Arial.ttf", 16)
+    except:
+        title_font = ImageFont.load_default()
+        text_font = ImageFont.load_default()
+        small_font = ImageFont.load_default()
+
+    # Draw title
+    title = scene.get('title', 'Adventure Scene')
+    title_bbox = draw.textbbox((0, 0), title, font=title_font)
+    title_width = title_bbox[2] - title_bbox[0]
+    draw.text(((width - title_width) // 2, 50), title, fill='white', font=title_font)
+
+    # Draw description
+    description = scene.get('description', 'Your adventure continues...')
+    words = description.replace('\n', ' ').split()
+    lines = []
+    current_line = []
+
+    for word in words:
+        test_line = ' '.join(current_line + [word])
+        test_bbox = draw.textbbox((0, 0), test_line, font=text_font)
+        if test_bbox[2] - test_bbox[0] > width - 100:
+            if current_line:
+                lines.append(' '.join(current_line))
+                current_line = [word]
+            else:
+                lines.append(word)
+        else:
+            current_line.append(word)
+
+    if current_line:
+        lines.append(' '.join(current_line))
+
+    y_pos = 200
+    for line in lines:
+        line_bbox = draw.textbbox((0, 0), line, font=text_font)
+        line_width = line_bbox[2] - line_bbox[0]
+        draw.text(((width - line_width) // 2, y_pos), line, fill='white', font=text_font)
+        y_pos += 30
+
+    # Draw simple stats
+    player_state = scene.get('player_state', INITIAL_PLAYER_STATE)
+    stats_text = f"Health: {player_state.get('health', 100)}/{player_state.get('max_health', 100)} | Gold: {player_state.get('gold', 50)} | Level: {player_state.get('level', 1)}"
+    draw.text((50, height - 50), stats_text, fill='white', font=small_font)
+
     buffer = BytesIO()
     img.save(buffer, format='PNG', quality=95)
     return buffer.getvalue()
 
-def generate_choice_image(choice_type):
-    """Generate choice button images"""
-    current_state = get_current_game_state()
-    scene_id = current_state.get('current_scene', 'start')
-    scene = get_or_generate_scene(scene_id)
-    
-    choice_data = scene.get('choices', {}).get(choice_type, {
-        'text': 'Continue Adventure', 
-        'leads_to': 'start'
-    })
-    
-    # Create button image
+def generate_choice_image_fallback(choice_type, choice_data, color):
+    """Fallback choice image generation using PIL"""
     width, height = 400, 80
-    color = '#4CAF50' if choice_type == 'a' else '#2196F3'
-    hover_color = '#45a049' if choice_type == 'a' else '#1976D2'
-    
     img = Image.new('RGB', (width, height), color)
     draw = ImageDraw.Draw(img)
-    
-    # Add button border
+
     draw.rectangle([2, 2, width-3, height-3], outline='white', width=2)
-    
+
     try:
-        font = ImageFont.truetype("/opt/fonts/Arial-Bold.ttf", 20)
+        font = ImageFont.truetype("/opt/fonts/Arial-Bold.ttf", 18)
     except:
         font = ImageFont.load_default()
-    
-    # Center the text
+
     text = choice_data['text']
     text_bbox = draw.textbbox((0, 0), text, font=font)
     text_width = text_bbox[2] - text_bbox[0]
     text_height = text_bbox[3] - text_bbox[1]
-    
+
     x = (width - text_width) // 2
     y = (height - text_height) // 2
-    
+
     draw.text((x, y), text, fill='white', font=font)
-    
-    # Add choice indicator
-    choice_label = f"Choice {choice_type.upper()}"
-    draw.text((10, 10), choice_label, fill='white', font=font)
-    
+
     buffer = BytesIO()
     img.save(buffer, format='PNG', quality=95)
     return buffer.getvalue()

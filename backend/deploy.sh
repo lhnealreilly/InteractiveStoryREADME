@@ -12,7 +12,7 @@ command -v python3 >/dev/null 2>&1 || { echo "❌ Python 3 is required but not i
 # Configuration
 FUNCTION_NAME="interactive-adventure"
 REGION="us-east-1"
-RUNTIME="python3.9"
+RUNTIME="python3.10"
 
 echo "📋 Configuration:"
 echo "   Function Name: $FUNCTION_NAME"
@@ -29,7 +29,10 @@ cp ../lambda_function.py .
 
 # Install dependencies
 echo "🔧 Installing Python dependencies..."
-pip install --target . boto3
+pip3.10 install --target . boto3 google-genai python-dotenv jinja2
+
+# Copy .env file for environment variables
+cp ../.env .
 
 # Create fonts directory for better text rendering
 mkdir -p fonts
@@ -116,7 +119,9 @@ aws lambda create-function \
   --zip-file fileb://adventure-backend.zip \
   --timeout 30 \
   --memory-size 512 \
-  --layers "arn:aws:lambda:us-east-1:770693421928:layer:Klayers-p39-pillow:1" \
+  --layers "arn:aws:lambda:us-east-1:770693421928:layer:Klayers-p310-Pillow:12",\
+    "arn:aws:lambda:us-east-1:770693421928:layer:Klayers-p310-pydantic:20",\
+    "arn:aws:lambda:us-east-1:347599033421:layer:wkhtmltopdf-0_12_6:1" \
   --region $REGION 2>/dev/null || {
     echo "📝 Function exists, updating code..."
     aws lambda update-function-code \
@@ -127,7 +132,9 @@ aws lambda create-function \
     echo "🔄 Updating function configuration with Pillow layer..."
     aws lambda update-function-configuration \
       --function-name $FUNCTION_NAME \
-      --layers "arn:aws:lambda:us-east-1:770693421928:layer:Klayers-p39-pillow:1" \
+      --layers "arn:aws:lambda:us-east-1:770693421928:layer:Klayers-p310-Pillow:12",\
+        "arn:aws:lambda:us-east-1:770693421928:layer:Klayers-p310-pydantic:20",\
+        "arn:aws:lambda:us-east-1:347599033421:layer:wkhtmltopdf-0_12_6:1" \
       --region $REGION
   }
 
