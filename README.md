@@ -22,7 +22,7 @@
 This isn't just a README - it's a **fully interactive RPG adventure game** that lives entirely within GitHub's markdown system. No external websites, no JavaScript, no installations required. Just pure markdown magic powered by AI-driven storytelling and creative use of GitHub's image proxy system.
 
 ### 🎯 The Innovation
-By leveraging GitHub's image serving mechanism, **Google Gemini AI**, and dynamic PNG generation, we've created something quite interesting: A fully functional choose your own adventure that lives entierely withing a README.md file.
+By leveraging GitHub's image serving mechanism, **Google Gemini AI**, and dynamic PNG generation, we've created something quite interesting: A fully functional global choose your own adventure that lives entirely withing a README.md file.
 
 ### ⭐ Revolutionary Features
 
@@ -36,7 +36,7 @@ By leveraging GitHub's image serving mechanism, **Google Gemini AI**, and dynami
 
 ## 🎮 The Adventure Begins
 
-*Welcome to an AI-powered adventure where every choice matters. Your character has health, gold, and items that persist throughout your journey. Choose wisely - death resets everything, but victory brings rewards and progression through an infinite, procedurally generated world...*
+*Welcome to an AI-powered adventure where every choice matters. Your character has health, gold, and items that persist throughout the journey. Choose wisely - death resets everything, but victory brings rewards and progression through an infinite, procedurally generated world...*
 
 ### 🎭 Your Character Stats
 *Displayed live on every scene - watch your health, gold, and items change based on your choices!*
@@ -56,9 +56,6 @@ By leveraging GitHub's image serving mechanism, **Google Gemini AI**, and dynami
 
 ### Adventure Statistics
 ![Adventure Stats](https://13sx4b67dg.execute-api.us-east-1.amazonaws.com/prod/stats.png?v=1)
-
-### Recent Adventurers' Choices
-![Choice History](https://13sx4b67dg.execute-api.us-east-1.amazonaws.com/prod/history.png?v=1)
 
 ---
 
