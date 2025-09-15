@@ -26,6 +26,7 @@ cd deployment
 
 # Copy Lambda function
 cp ../lambda_function.py .
+cp ../game_state_manager.py .
 
 # Install dependencies
 echo "🔧 Installing Python dependencies..."

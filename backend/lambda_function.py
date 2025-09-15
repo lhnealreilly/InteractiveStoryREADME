@@ -15,6 +15,8 @@ from pydantic import BaseModel
 from typing import List, Optional
 from dotenv import load_dotenv
 from jinja2 import Template
+import game_state_manager
+import traceback
 
 load_dotenv()
 
@@ -27,6 +29,8 @@ story_scenes_table = dynamodb.Table('adventure-story-scenes')
 # Google Gemini setup
 GOOGLE_API_KEY = os.getenv('GOOGLE_API_KEY')
 genai_client = genai.Client(api_key=GOOGLE_API_KEY)
+
+game_state = game_state_manager.GameStateManager()
 
 # Pydantic models for structured scene generation
 class SceneChoice(BaseModel):
@@ -63,16 +67,6 @@ STORY_THEMES = {
     }
 }
 
-# Player state configuration
-INITIAL_PLAYER_STATE = {
-    'health': 100,
-    'max_health': 100,
-    'gold': 50,
-    'items': ['basic_sword', 'leather_armor'],
-    'level': 1,
-    'experience': 0
-}
-
 # Item definitions
 ITEMS = {
     'basic_sword': {'name': 'Basic Sword', 'type': 'weapon', 'power': 10},
@@ -100,7 +94,7 @@ INITIAL_SCENE = {
     },
     'theme': 'fantasy',
     'created_at': datetime.now().isoformat(),
-    'player_state': INITIAL_PLAYER_STATE.copy(),
+    'player_state': game_state_manager.PlayerState(),
     'summary': 'Your adventure begins in this mysterious realm.'
 }
 
@@ -119,17 +113,16 @@ SCENE_TEMPLATE = """
             margin: 0;
             padding: 0;
             box-sizing: border-box;
-            background: #0d1117;
         }
 
         body {
             width: 800px;
             height: 600px;
-            background: linear-gradient(135deg, #0d1117, {{ background_color }}99);
             font-family: 'Cormorant Garamond', serif;
             color: #ffffff;
             position: relative;
             overflow: hidden;
+            background: #0d1117;
         }
 
         .scene-container {
@@ -139,6 +132,7 @@ SCENE_TEMPLATE = """
             flex-direction: column;
             justify-content: space-between;
             position: relative;
+            background: #0d1117;
         }
 
         .decorative-border {
@@ -294,29 +288,7 @@ SCENE_TEMPLATE = """
             <div class="description">{{ description | replace('\n', '<br>') }}</div>
         </div>
 
-        <div class="stats-overlay">
-            <div class="stat-line">
-                <span class="stat-icon">❤️</span>
-                Health: {{ health }}/{{ max_health }}
-                <div class="health-bar">
-                    <div class="health-fill"></div>
-                </div>
-            </div>
-            <div class="stat-line">
-                <span class="stat-icon">💰</span>
-                Gold: {{ gold }}
-            </div>
-            <div class="stat-line">
-                <span class="stat-icon">⭐</span>
-                Level: {{ level }} (XP: {{ experience }})
-            </div>
-            {% if items %}
-            <div class="stat-line">
-                <span class="stat-icon">🎒</span>
-                Items: {{ items_display }}
-            </div>
-            {% endif %}
-        </div>
+
     </div>
 
     <div class="decorative-elements">
@@ -346,7 +318,7 @@ CHOICE_TEMPLATE = """
 
         body {
             width: 400px;
-            height: 80px;
+            height: 150px;
             font-family: 'Cinzel', serif;
             color: #ffffff;
             display: flex;
@@ -460,10 +432,12 @@ CHOICE_TEMPLATE = """
 
 def lambda_handler(event, context):
     """Main Lambda handler for adventure game endpoints"""
-    
+    print(f"DEBUG: Lambda handler called with path: {event.get('path', '/')}")
+
     # Extract path and query parameters
     path = event.get('path', '/')
     query_params = event.get('queryStringParameters') or {}
+    print(f"DEBUG: Query params: {query_params}")
     
     # Set CORS headers
     headers = {
@@ -477,9 +451,11 @@ def lambda_handler(event, context):
     try:
         # Route to appropriate handler
         if path.endswith('/scene.png'):
+            print("DEBUG: Generating scene image")
             image_data = generate_scene_image()
         elif path.endswith('/choice/a') or path.endswith('/choice/b'):
             choice = 'a' if path.endswith('/a') else 'b'
+            print(f"DEBUG: Processing choice: {choice}")
             process_choice(choice)
             # Redirect back to GitHub README
             return {
@@ -490,11 +466,16 @@ def lambda_handler(event, context):
                 }
             }
         elif path.endswith('/option/a.png'):
+            print("DEBUG: Generating choice A image")
             image_data = generate_choice_image('a')
         elif path.endswith('/option/b.png'):
+            print("DEBUG: Generating choice B image")
             image_data = generate_choice_image('b')
         elif path.endswith('/stats.png'):
             image_data = generate_stats_image()
+        elif path.endswith('/player.png'):
+            print("DEBUG: Generating player stats image")
+            #TODO Generate player stats image
         elif path.endswith('/history.png'):
             image_data = generate_history_image()
         else:
@@ -522,8 +503,10 @@ def lambda_handler(event, context):
 
 def get_current_game_state():
     """Retrieve current game state from DynamoDB"""
+    print("DEBUG: Getting current game state from DynamoDB")
     try:
         response = game_state_table.get_item(Key={'game_id': 'global'})
+        print(f"DEBUG: DynamoDB response: {response}")
         if 'Item' in response:
             return response['Item']
         else:
@@ -584,16 +567,24 @@ def update_stats(scene_id):
 
 def get_or_generate_scene(scene_id, theme='fantasy', previous_scene=None, choice_made=None):
     """Get scene from DynamoDB or generate new one if it doesn't exist"""
+    print(f"DEBUG: Getting/generating scene: {scene_id}, theme: {theme}")
 
     # Handle initial scene specially
     if scene_id == 'start':
+        print("DEBUG: Returning initial scene")
         return INITIAL_SCENE
 
     try:
         # Try to get existing scene from DynamoDB
+        print(f"DEBUG: Checking DynamoDB for existing scene: {scene_id}")
         response = story_scenes_table.get_item(Key={'scene_id': scene_id})
         if 'Item' in response:
-            return response['Item']
+            print(f"DEBUG: Found existing scene in DynamoDB")
+            processed_scene = {**response['Item']}
+            processed_scene['player_state'] = game_state.import_state(processed_scene['player_state'])
+            return processed_scene
+        else:
+            print(f"DEBUG: Scene not found in DynamoDB, will generate new one")
     except Exception as e:
         print(f"Error fetching scene {scene_id}: {e}")
 
@@ -603,205 +594,35 @@ def get_or_generate_scene(scene_id, theme='fantasy', previous_scene=None, choice
 
 def generate_new_scene(scene_id, theme='fantasy', previous_scene=None, choice_made=None):
     """Generate a new story scene using Gemini AI with fallback to procedural generation"""
+    print(f"DEBUG: Generating new scene: {scene_id}")
+    print(f"DEBUG: Previous scene: {previous_scene.get('scene_id', 'None') if previous_scene else 'None'}")
+    print(f"DEBUG: Choice made: {choice_made}")
+    print(f"DEBUG: Previous scene player state: {previous_scene}")
 
     # Try Gemini generation first
+    print("DEBUG: Attempting Gemini scene generation")
     gemini_scene = generate_scene_with_gemini(scene_id, theme, previous_scene, choice_made)
 
-    if gemini_scene:
-        # Add player state to Gemini-generated scene
-        player_state = generate_player_state_for_scene(scene_id, theme, previous_scene, choice_made)
-        gemini_scene['player_state'] = player_state
-
-        # Save to DynamoDB
-        try:
-            story_scenes_table.put_item(Item=gemini_scene)
-            print(f"Saved Gemini-generated scene: {scene_id}")
-        except Exception as e:
-            print(f"Error saving Gemini scene {scene_id}: {e}")
-
-        return gemini_scene
-
-    # Fallback to original procedural generation
-    print(f"Falling back to procedural generation for scene: {scene_id}")
-
-    # Get theme data
-    theme_data = STORY_THEMES.get(theme, STORY_THEMES['fantasy'])
-
-    # Generate scene content
-    location = random.choice(theme_data['locations'])
-    creature = random.choice(theme_data['creatures'])
-    object_item = random.choice(theme_data['objects'])
-    background_color = random.choice(theme_data['colors'])
-
-    # Create story variations based on scene patterns
-    scene_patterns = [
-        {
-            'title': f'The {location.title()}',
-            'description': f'You arrive at {location}. A {creature} watches\\nyou from the shadows. What do you do?',
-            'summary': f'You venture deeper into the adventure and encounter {location}.'
-        },
-        {
-            'title': f'Encounter at {location.title()}',
-            'description': f'Before you lies {location}. You notice\\n{object_item} glinting in the distance.',
-            'summary': f'Your journey leads you to {location} where you spot something interesting.'
-        },
-        {
-            'title': f'The {creature.title()} Challenge',
-            'description': f'A {creature} emerges from {location}.\\nIt seems to be guarding {object_item}.',
-            'summary': f'A {creature} appears before you, presenting a new challenge.'
-        }
-    ]
-
-    pattern = random.choice(scene_patterns)
-
-    # Generate choice options based on theme
-    choice_patterns = {
-        'fantasy': [
-            ('Cast a spell', 'Use magic'),
-            ('Draw your sword', 'Attack directly'),
-            ('Speak peacefully', 'Try diplomacy'),
-            ('Search for clues', 'Investigate further'),
-            ('Take the treasure', 'Claim the reward'),
-            ('Proceed cautiously', 'Move forward')
-        ],
-        'sci_fi': [
-            ('Scan with tricorder', 'Use technology'),
-            ('Fire plasma weapon', 'Attack with energy'),
-            ('Establish contact', 'Attempt communication'),
-            ('Access database', 'Check records'),
-            ('Activate shield', 'Defensive action'),
-            ('Navigate around', 'Find alternate route')
-        ],
-        'mystery': [
-            ('Examine evidence', 'Investigate closely'),
-            ('Question suspect', 'Interrogate person'),
-            ('Follow the trail', 'Pursue lead'),
-            ('Search the area', 'Look for clues'),
-            ('Call for backup', 'Get assistance'),
-            ('Confront directly', 'Direct approach')
-        ]
-    }
-
-    theme_choices = choice_patterns.get(theme, choice_patterns['fantasy'])
-    selected_choices = random.sample(theme_choices, 2)
-
-    # Generate next scene IDs
-    scene_num = len(scene_id)  # Simple way to create unique IDs
-    next_scene_a = f'{theme}_{scene_num}a_{random.randint(1000, 9999)}'
-    next_scene_b = f'{theme}_{scene_num}b_{random.randint(1000, 9999)}'
-
-    # Generate player state based on previous scene and choice
-    player_state = generate_player_state_for_scene(scene_id, theme, previous_scene, choice_made)
-
-    new_scene = {
-        'scene_id': scene_id,
-        'title': pattern['title'],
-        'description': pattern['description'],
-        'summary': pattern['summary'],
-        'background_color': background_color,
-        'choices': {
-            'a': {'text': selected_choices[0][0], 'leads_to': next_scene_a},
-            'b': {'text': selected_choices[1][0], 'leads_to': next_scene_b}
-        },
-        'theme': theme,
-        'created_at': datetime.now().isoformat(),
-        'player_state': player_state
-    }
+    print("DEBUG: Gemini scene generation successful")
+    # Add player state to Gemini-generated scene
+    #TODO Calculate the new player state based on consequences of the choice made
+    #player_state = game_state.apply_choice_consequences(previous_scene.get('player_state'), choice_made, scene_id)
+    player_state = game_state_manager.PlayerState()
+    gemini_scene['player_state'] = player_state
+    print(f"DEBUG: Added player state to scene: {player_state}")
 
     # Save to DynamoDB
     try:
-        story_scenes_table.put_item(Item=new_scene)
-        print(f"Saved new scene: {scene_id}")
+        saveable_scene = {**gemini_scene}
+        saveable_scene['player_state'] = game_state.export_state(gemini_scene['player_state'])
+        story_scenes_table.put_item(Item=saveable_scene)
+        print(f"Saved Gemini-generated scene: {scene_id}")
     except Exception as e:
-        print(f"Error saving scene {scene_id}: {e}")
+        print(f"Error saving Gemini scene {scene_id}: {e}")
 
-    return new_scene
+    return gemini_scene
+    
 
-def generate_player_state_for_scene(scene_id, theme, previous_scene=None, choice_made=None):
-    """Generate deterministic player state based on previous state and action taken"""
-
-    # Start with initial state if no previous scene
-    if previous_scene is None:
-        return INITIAL_PLAYER_STATE.copy()
-
-    # Get previous player state
-    prev_state = previous_scene.get('player_state', INITIAL_PLAYER_STATE).copy()
-
-    # Determine action type based on choice text and theme
-    choice_text = previous_scene.get('choices', {}).get(choice_made, {}).get('text', '').lower()
-
-    # Action patterns that affect player state
-    action_effects = {
-        # Combat actions
-        'fight': {'health': -15, 'gold': 30, 'experience': 20},
-        'attack': {'health': -15, 'gold': 30, 'experience': 20},
-        'sword': {'health': -10, 'gold': 25, 'experience': 15},
-        'weapon': {'health': -12, 'gold': 28, 'experience': 18},
-
-        # Peaceful actions
-        'speak': {'health': 5, 'gold': 10, 'experience': 15},
-        'peaceful': {'health': 5, 'gold': 10, 'experience': 15},
-        'diplomacy': {'health': 5, 'gold': 15, 'experience': 20},
-
-        # Exploration actions
-        'search': {'health': 0, 'gold': 20, 'experience': 10},
-        'investigate': {'health': -5, 'gold': 15, 'experience': 25},
-        'examine': {'health': 0, 'gold': 5, 'experience': 15},
-
-        # Treasure/reward actions
-        'treasure': {'health': 0, 'gold': 50, 'experience': 15},
-        'take': {'health': 0, 'gold': 35, 'experience': 10},
-        'claim': {'health': 0, 'gold': 45, 'experience': 12},
-
-        # Magic actions
-        'spell': {'health': 10, 'gold': 5, 'experience': 30},
-        'magic': {'health': 10, 'gold': 5, 'experience': 30},
-
-        # Rest/healing actions
-        'rest': {'health': 25, 'gold': 0, 'experience': 5},
-        'drink': {'health': 30, 'gold': -5, 'experience': 5},
-
-        # Risky actions
-        'continue': {'health': -8, 'gold': 12, 'experience': 8},
-        'proceed': {'health': -5, 'gold': 8, 'experience': 12}
-    }
-
-    # Find matching action effect
-    effect = {'health': 0, 'gold': 0, 'experience': 0}
-    for keyword, modifier in action_effects.items():
-        if keyword in choice_text:
-            effect = modifier
-            break
-
-    # Apply base scene progression (small random but deterministic changes)
-    scene_hash = hash(scene_id) % 100
-    base_effect = {
-        'health': -2 + (scene_hash % 5),  # -2 to +2
-        'gold': 5 + (scene_hash % 10),   # 5 to 14
-        'experience': 3 + (scene_hash % 8)  # 3 to 10
-    }
-
-    # Combine effects
-    new_state = prev_state.copy()
-    new_state['health'] = max(0, min(new_state['max_health'],
-                                   new_state['health'] + effect['health'] + base_effect['health']))
-    new_state['gold'] = max(0, new_state['gold'] + effect['gold'] + base_effect['gold'])
-    new_state['experience'] += effect['experience'] + base_effect['experience']
-
-    # Level up logic
-    exp_needed = new_state['level'] * 100
-    if new_state['experience'] >= exp_needed:
-        new_state['level'] += 1
-        new_state['max_health'] += 20
-        new_state['health'] = new_state['max_health']  # Full heal on level up
-
-        # Add items based on level and theme
-        new_items = get_level_items(new_state['level'], theme)
-        for item in new_items:
-            if item not in new_state['items']:
-                new_state['items'].append(item)
-
-    return new_state
 
 def get_level_items(level, theme):
     """Get items awarded at specific levels based on theme"""
@@ -874,51 +695,32 @@ def render_html_to_png(html_content, width=800, height=600):
         print(f"HTML to PNG conversion failed: {e}")
         return None
 
-def generate_scene_with_gemini(scene_id, theme, previous_scene=None, choice_made=None):
+def generate_scene_with_gemini(scene_id, theme, previous_scene=None, choice_made=None, player_state=None):
     """Use Google Gemini to generate a new scene with structured output"""
 
     try:
-        # Build context from previous scene
-        if previous_scene and choice_made:
-            prev_title = previous_scene.get('title', 'Unknown Scene')
-            prev_description = previous_scene.get('description', '')
-            choice_text = previous_scene.get('choices', {}).get(choice_made, {}).get('text', 'made a choice')
-            player_state = previous_scene.get('player_state', INITIAL_PLAYER_STATE)
+        # Use GameStateManager to generate consequence-aware prompt
+        if player_state is None:
+            player_state = previous_scene.get('player_state', {})
 
-            context = f"""
-Previous scene: "{prev_title}"
-Previous description: {prev_description}
-Player chose: "{choice_text}"
-Current player state: Health {player_state.get('health', 100)}/{player_state.get('max_health', 100)},
-Gold {player_state.get('gold', 50)}, Level {player_state.get('level', 1)},
-Items: {', '.join(player_state.get('items', []))}
-"""
-        else:
-            context = "This is the beginning of a new adventure."
+        # Generate the sophisticated prompt using GameStateManager
+        prompt = game_state.generate_scene_prompt(player_state, theme, previous_scene, choice_made)
 
-        # Get theme information
+        # Add theme-specific elements to the prompt
         theme_data = STORY_THEMES.get(theme, STORY_THEMES['fantasy'])
         locations = ', '.join(theme_data['locations'])
         creatures = ', '.join(theme_data['creatures'])
         objects = ', '.join(theme_data['objects'])
 
-        prompt = f"""
-You are creating an interactive adventure scene for a {theme} themed story.
+        prompt += f"""
 
-{context}
+THEME ELEMENTS FOR {theme.upper()}:
+- Locations: {locations}
+- Creatures: {creatures}
+- Objects: {objects}
+- Color palette: {', '.join(theme_data['colors'])}
 
-Create a new scene that continues the story logically. The scene should:
-1. Have an engaging title
-2. Provide a vivid description (2-3 sentences, use \\n for line breaks)
-3. Include a summary of what happened between the previous scene and this one (e.g., "You swing your sword at the phoenix, it shoots flames at you")
-4. Choose an appropriate background color from the theme palette: {', '.join(theme_data['colors'])}
-5. Offer two meaningful choices that fit the {theme} theme
-6. Use these theme elements when appropriate:
-   - Locations: {locations}
-   - Creatures: {creatures}
-   - Objects: {objects}
-
-Make the story engaging and maintain narrative consistency with the previous events.
+Use these elements appropriately in your scene generation.
 """
 
         # Generate scene using Gemini
@@ -954,42 +756,70 @@ Make the story engaging and maintain narrative consistency with the previous eve
     except Exception as e:
         print(f"Error generating scene with Gemini: {e}")
         # Fallback to original generation method
-        return None
+        print(traceback.format_exc())
 
 def process_choice(choice):
     """Process a player's choice and update game state"""
+    print(f"DEBUG: Processing choice: {choice}")
     current_state = get_current_game_state()
     current_scene_id = current_state.get('current_scene', 'start')
+    print(f"DEBUG: Current scene ID: {current_scene_id}")
 
     scene = get_or_generate_scene(current_scene_id)
+    print(f"DEBUG: Current scene choices: {scene.get('choices', {})}")
 
     if choice in scene.get('choices', {}):
         next_scene_id = scene['choices'][choice]['leads_to']
+        print(f"DEBUG: Choice leads to scene: {next_scene_id}")
 
-        # Ensure the next scene exists or generate it with player state context
+        # Generate the next scene with choice consequences
         next_scene = get_or_generate_scene(next_scene_id, scene.get('theme', 'fantasy'), scene, choice)
 
-        # Check if player died (health <= 0)
-        if next_scene.get('player_state', {}).get('health', 100) <= 0:
-            # Reset to start if player died
-            update_game_state('start')
-        else:
-            update_game_state(next_scene_id)
+        # Update game state to the new scene
+        # (Death handling is already done in generate_new_scene)
+        update_game_state(next_scene.get('scene_id', next_scene_id))
+
+        # Update death statistics if player died
+        if next_scene.get('scene_id') == 'start' and scene.get('scene_id') != 'start':
+            try:
+                stats_table.update_item(
+                    Key={'stat_type': 'player_deaths'},
+                    UpdateExpression='SET death_count = if_not_exists(death_count, :zero) + :inc',
+                    ExpressionAttributeValues={':inc': 1, ':zero': 0}
+                )
+            except Exception as e:
+                print(f"Error updating death stats: {e}")
 
 def generate_scene_image():
     """Generate the main scene image using HTML template rendering"""
+    print("DEBUG: Starting scene image generation")
     current_state = get_current_game_state()
     scene_id = current_state.get('current_scene', 'start')
+    print(f"DEBUG: Current scene ID for image: {scene_id}")
     scene = get_or_generate_scene(scene_id)
+    print(f"DEBUG: Scene data: {scene.get('title', 'No title')} - {scene.get('description', 'No description')[:50]}...")
 
-    # Get player state
-    player_state = scene.get('player_state', INITIAL_PLAYER_STATE)
-    health = player_state.get('health', 100)
-    max_health = player_state.get('max_health', 100)
-    gold = player_state.get('gold', 50)
-    level = player_state.get('level', 1)
-    experience = player_state.get('experience', 0)
-    items = player_state.get('items', [])
+    # Get player state - handle both old and new formats
+    player_state_data = scene.get('player_state', {})
+    print(f"DEBUG: Player state data: {player_state_data}")
+    if isinstance(player_state_data, game_state_manager.PlayerState):
+        # New format - import from GameStateManager
+        player_state = player_state_data
+        print(f"DEBUG: Successfully imported player state")
+    else:
+        print(f"DEBUG: Player state data dict, converting to PlayerState")
+        player_state = game_state.import_state(player_state_data)
+
+    health = player_state.health
+    max_health = player_state.max_health
+    gold = player_state.gold
+    level = player_state.level
+    experience = player_state.experience
+    items = player_state.items
+    food = getattr(player_state, 'food', 3)
+    corruption = getattr(player_state, 'corruption', 0)
+    reputation = getattr(player_state, 'reputation', 'unknown')
+    print(f"DEBUG: Player stats - Health: {health}/{max_health}, Food: {food}, Gold: {gold}, Corruption: {corruption}")
 
     # Prepare items display
     items_display = ""
@@ -1017,16 +847,17 @@ def generate_scene_image():
         gold=gold,
         level=level,
         experience=experience,
+        food=food,
+        corruption=corruption,
+        reputation=reputation,
         items=items,
         items_display=items_display
     )
 
     # Convert HTML to PNG
+    print("DEBUG: Converting HTML to PNG")
     png_data = render_html_to_png(html_content, 800, 600)
 
-    # Fallback to PIL if HTML conversion fails
-    if png_data is None:
-        return generate_scene_image_fallback(scene, current_state)
 
     return png_data
 
@@ -1055,137 +886,48 @@ def generate_choice_image(choice_type):
     )
 
     # Convert HTML to PNG
-    png_data = render_html_to_png(html_content, 400, 80)
-
-    # Fallback to PIL if HTML conversion fails
-    if png_data is None:
-        return generate_choice_image_fallback(choice_type, choice_data, color)
+    png_data = render_html_to_png(html_content, 400, 150)
 
     return png_data
 
-def generate_scene_image_fallback(scene, current_state):
-    """Fallback scene image generation using PIL"""
-    width, height = 800, 600
-    img = Image.new('RGB', (width, height), scene.get('background_color', '#2d5016'))
-    draw = ImageDraw.Draw(img)
-
-    try:
-        title_font = ImageFont.truetype("/opt/fonts/Arial-Bold.ttf", 36)
-        text_font = ImageFont.truetype("/opt/fonts/Arial.ttf", 20)
-        small_font = ImageFont.truetype("/opt/fonts/Arial.ttf", 16)
-    except:
-        title_font = ImageFont.load_default()
-        text_font = ImageFont.load_default()
-        small_font = ImageFont.load_default()
-
-    # Draw title
-    title = scene.get('title', 'Adventure Scene')
-    title_bbox = draw.textbbox((0, 0), title, font=title_font)
-    title_width = title_bbox[2] - title_bbox[0]
-    draw.text(((width - title_width) // 2, 50), title, fill='white', font=title_font)
-
-    # Draw description
-    description = scene.get('description', 'Your adventure continues...')
-    words = description.replace('\n', ' ').split()
-    lines = []
-    current_line = []
-
-    for word in words:
-        test_line = ' '.join(current_line + [word])
-        test_bbox = draw.textbbox((0, 0), test_line, font=text_font)
-        if test_bbox[2] - test_bbox[0] > width - 100:
-            if current_line:
-                lines.append(' '.join(current_line))
-                current_line = [word]
-            else:
-                lines.append(word)
-        else:
-            current_line.append(word)
-
-    if current_line:
-        lines.append(' '.join(current_line))
-
-    y_pos = 200
-    for line in lines:
-        line_bbox = draw.textbbox((0, 0), line, font=text_font)
-        line_width = line_bbox[2] - line_bbox[0]
-        draw.text(((width - line_width) // 2, y_pos), line, fill='white', font=text_font)
-        y_pos += 30
-
-    # Draw simple stats
-    player_state = scene.get('player_state', INITIAL_PLAYER_STATE)
-    stats_text = f"Health: {player_state.get('health', 100)}/{player_state.get('max_health', 100)} | Gold: {player_state.get('gold', 50)} | Level: {player_state.get('level', 1)}"
-    draw.text((50, height - 50), stats_text, fill='white', font=small_font)
-
-    buffer = BytesIO()
-    img.save(buffer, format='PNG', quality=95)
-    return buffer.getvalue()
-
-def generate_choice_image_fallback(choice_type, choice_data, color):
-    """Fallback choice image generation using PIL"""
-    width, height = 400, 80
-    img = Image.new('RGB', (width, height), color)
-    draw = ImageDraw.Draw(img)
-
-    draw.rectangle([2, 2, width-3, height-3], outline='white', width=2)
-
-    try:
-        font = ImageFont.truetype("/opt/fonts/Arial-Bold.ttf", 18)
-    except:
-        font = ImageFont.load_default()
-
-    text = choice_data['text']
-    text_bbox = draw.textbbox((0, 0), text, font=font)
-    text_width = text_bbox[2] - text_bbox[0]
-    text_height = text_bbox[3] - text_bbox[1]
-
-    x = (width - text_width) // 2
-    y = (height - text_height) // 2
-
-    draw.text((x, y), text, fill='white', font=font)
-
-    buffer = BytesIO()
-    img.save(buffer, format='PNG', quality=95)
-    return buffer.getvalue()
-
 def generate_stats_image():
-    """Generate statistics display image"""
+    """Generate global statistics display image"""
     try:
         # Get stats from DynamoDB
         response = stats_table.scan()
         stats_data = {item['stat_type']: item for item in response.get('Items', [])}
     except:
         stats_data = {}
-    
+
     width, height = 600, 300
     img = Image.new('RGB', (width, height), '#1a1a2e')
     draw = ImageDraw.Draw(img)
-    
+
     try:
         title_font = ImageFont.truetype("/opt/fonts/Arial-Bold.ttf", 32)
         text_font = ImageFont.truetype("/opt/fonts/Arial.ttf", 20)
     except:
         title_font = ImageFont.load_default()
         text_font = ImageFont.load_default()
-    
+
     # Title
     draw.text((50, 30), "*** Adventure Statistics ***", fill='white', font=title_font)
-    
+
     # Stats
     y_pos = 100
     current_state = get_current_game_state()
-    
+
     stats_lines = [
         f"* Total Choices Made: {current_state.get('choices_made', 0)}",
         f"* Current Scene: {current_state.get('current_scene', 'start').replace('_', ' ').title()}",
         f"* Last Updated: {datetime.now().strftime('%Y-%m-%d %H:%M UTC')}",
         f"* Adventure Score: {random.randint(1000, 9999)}"
     ]
-    
+
     for line in stats_lines:
         draw.text((50, y_pos), line, fill='white', font=text_font)
         y_pos += 35
-    
+
     buffer = BytesIO()
     img.save(buffer, format='PNG', quality=95)
     return buffer.getvalue()

@@ -366,7 +366,7 @@ headers = {
 - [x] Basic choice system
 - [x] Dynamic scene generation  
 - [x] Global statistics tracking
-
+- [ ] Make choices and consequences make sense and have real impact on the player state
 
 ### Phase 2: Advanced Features *(Next Month)*
 - [ ] Inventory management system
