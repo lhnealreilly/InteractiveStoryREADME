@@ -1,5 +1,5 @@
 # 🗺️ The Interactive GitHub Adventure
-### *The first choose-your-own-adventure that lives entirely in a README.md file*
+### *The first choose-your-own-adventure that lives entirely in a README.md file -- Note: You may need to reload GitHub if the Images don't load the first time*
 
 <div align="center">
 
